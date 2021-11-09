@@ -4,17 +4,46 @@
 // We know that the slave adress for this IMU is 0x68
 #define SLAVE_ADDR 0x68
 
-void pinISR();
+void pinChangeISR();
+
+void readAccelRaw() {
+	Wire.beginTransmission(SLAVE_ADDR);
+	Wire.write(MPU_6050_ACCEL_XOUT_H);		// Send address for accelerometer data registers
+	Wire.endTransmission(false);
+	Wire.requestFrom(SLAVE_ADDR,6,true);	// Request 6 registers. (XOUT_H, XOUT_L, YOUT_H, YOUT_L, ZOUT_H, and ZOUT_L)
+	
+	/*We have asked for the ACCEL_XOUT_H register. The IMU will send a brust of one byte registers.
+	* The amount of bytes to read is specify in the requestFrom function.
+	* In this case we request 6 registers. Each value is stored in
+	* two 8bits registers, low values and high values. For that we request the 6 of them  
+	* and smash them together in pairs. For that we shift the high values to the left 8 bits 
+	* (<<) and use an or (|) operation to include the low values.
+	If we read the datasheet, for a range of +/-8g, we have to divide the raw values by 4096*/ 
+
+	Acc_rawX=(Wire.read()<<8|Wire.read())/4096.0 ; //each value is two bytes
+	Acc_rawY=(Wire.read()<<8|Wire.read())/4096.0 ;
+	Acc_rawZ=(Wire.read()<<8|Wire.read())/4096.0 ;
+}
+
+void readGyroRaw() {
+	Wire.beginTransmission(SLAVE_ADDR);		//begin, Send the slave adress (in this case 68) 
+	Wire.write(MPU_6050_GYRO_XOUT_H);		// Send address for the gyro data registers
+	Wire.endTransmission(false);
+	Wire.requestFrom(SLAVE_ADDR,4,true);	// Ask for 4 registers (XOUT_H, XOUT_L, YOUT_H, and YOUT_L)
+		
+	Gyr_rawX=Wire.read()<<8|Wire.read();	// Read two bytes (the x-axis data) from the slave.
+	Gyr_rawY=Wire.read()<<8|Wire.read();	// Read two more bytes (the y-axis data) from the slave
+}
 
 void setup() {
 	/********************************************
 	 * Enable interrupts
 	 ********************************************/
 	// Set pins D8, D9, D10, and D12 to trigger an interrupt on state change, using function "ISR"
-	attachInterrupt(digitalPinToInterrupt(8), pinISR, CHANGE); 
-	attachInterrupt(digitalPinToInterrupt(9), pinISR, CHANGE); 
-	attachInterrupt(digitalPinToInterrupt(10), pinISR, CHANGE);
-	attachInterrupt(digitalPinToInterrupt(12), pinISR, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(8), pinChangeISR, CHANGE); 
+	attachInterrupt(digitalPinToInterrupt(9), pinChangeISR, CHANGE); 
+	attachInterrupt(digitalPinToInterrupt(10), pinChangeISR, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(12), pinChangeISR, CHANGE);
 	/*********
 	 * Low level equivalent code:
 	 *	PCICR |= (1 << PCIE0);    //enable PCMSK0 scan                                                 
@@ -24,6 +53,9 @@ void setup() {
 	 *	PCMSK0 |= (1 << PCINT4);  //Set pin D12 trigger an interrupt on state change.  
 	 *********/
 
+	/********************************************
+	 * Setup pins
+	 ********************************************/
 	pinMode(13,OUTPUT);  //D13 as output
 	digitalWrite(13,LOW); //D13 set to LOW
 	/*********
@@ -49,7 +81,9 @@ void setup() {
 	R_B_prop.writeMicroseconds(1000);
 
 	
-
+	/*********************************************
+	 * Configure sensors
+	 * *******************************************/
 	Wire.begin();                           //begin the wire comunication
 	Wire.beginTransmission(SLAVE_ADDR);     //begin, Send the slave adress (in this case 68)              
 	Wire.write(MPU_6050_PWR_MGMT_1);        //make the reset (place a 0 into the 6B register)
@@ -71,19 +105,17 @@ void setup() {
 	time = millis();                         //Start counting time in milliseconds
 
 
-	/*Here we calculate the gyro data error before we start the loop
-	* I make the mean of 200 values, that should be enough*/
+	/************************************************
+	 * Calibrate errors
+	 * **********************************************
+	 * Here we calculate the gyro data error before we start the loop
+	 * I make the mean of 200 values, that should be enough
+	 *******************/
 	if(gyro_error==0)
 	{
 		for(int i=0; i<200; i++)
 		{
-			Wire.beginTransmission(SLAVE_ADDR);		//begin, Send the slave adress (in this case 68) 
-			Wire.write(MPU_6050_GYRO_XOUT_H);		// Send address for the gyro data registers
-			Wire.endTransmission(false);
-			Wire.requestFrom(SLAVE_ADDR,4,true);	// Ask for 4 registers (XOUT_H, XOUT_L, YOUT_H, and YOUT_L)
-				
-			Gyr_rawX=Wire.read()<<8|Wire.read();	// Read two bytes (the x-axis data) from the slave.
-			Gyr_rawY=Wire.read()<<8|Wire.read();	// Read two more bytes (the y-axis data) from the slave
+			readGyroRaw();
 
 			/*---X---*/
 			Gyro_raw_error_x = Gyro_raw_error_x + (Gyr_rawX/32.8); 
@@ -105,15 +137,7 @@ void setup() {
 	{
 		for(int a=0; a<200; a++)
 		{
-			Wire.beginTransmission(SLAVE_ADDR);
-			Wire.write(MPU_6050_ACCEL_XOUT_H);		// Send address for accelerometer data registers
-			Wire.endTransmission(false);
-			Wire.requestFrom(SLAVE_ADDR,6,true);	// Request 6 registers. (XOUT_H, XOUT_L, YOUT_H, YOUT_L, ZOUT_H, and ZOUT_L)
-			
-			Acc_rawX=(Wire.read()<<8|Wire.read())/4096.0 ; //each value is two bytes
-			Acc_rawY=(Wire.read()<<8|Wire.read())/4096.0 ;
-			Acc_rawZ=(Wire.read()<<8|Wire.read())/4096.0 ;
-
+			readAccelRaw();
 			
 			/*---X---*/
 			Acc_angle_error_x = Acc_angle_error_x + ((atan((Acc_rawY)/sqrt(pow((Acc_rawX),2) + pow((Acc_rawZ),2)))*rad_to_deg));
@@ -149,13 +173,8 @@ void loop() {
 	* begin functions .*/
 
 	//////////////////////////////////////Gyro read/////////////////////////////////////
-	Wire.beginTransmission(SLAVE_ADDR);		//begin, Send the slave adress (in this case 68) 
-	Wire.write(MPU_6050_GYRO_XOUT_H);		//First address of the Gyro data
-	Wire.endTransmission(false);
-	Wire.requestFrom(SLAVE_ADDR,4,true);	// Ask for 4 registers (XOUT_H, XOUT_L, YOUT_H, and YOUT_L)
+	readGyroRaw();
 
-	Gyr_rawX=Wire.read()<<8|Wire.read();	// Once again read two bytes for each axis
-	Gyr_rawY=Wire.read()<<8|Wire.read();
 	/*Now in order to obtain the gyro data in degrees/seconds we have to divide first
 	the raw value by 32.8 because that's the value that the datasheet gives us for a 1000dps range*/
 	/*---X---*/
@@ -172,21 +191,7 @@ void loop() {
 
 
 	//////////////////////////////////////Acc read/////////////////////////////////////
-	Wire.beginTransmission(SLAVE_ADDR);		//begin, Send the slave adress (in this case 68) 
-	Wire.write(MPU_6050_ACCEL_XOUT_H);		// Send address for accelerometer data registers
-	Wire.endTransmission(false);			//keep the transmission and next
-	Wire.requestFrom(SLAVE_ADDR,6,true);	//We ask for next 6 registers (XOUT_H, XOUT_L, YOUT_H, YOUT_L, ZOUT_H, and ZOUT_L) 
-
-	/*We have asked for the 0x3B register. The IMU will send a brust of one byte registers.
-	* The amount of bytes to read is specify in the requestFrom function.
-	* In this case we request 6 registers. Each value is stored in
-	* two 8bits registers, low values and high values. For that we request the 6 of them  
-	* and smash them together in pairs. For that we shift the high values to the left 8 bits 
-	* (<<) and use an or (|) operation to include the low values.
-	If we read the datasheet, for a range of +/-8g, we have to divide the raw values by 4096*/    
-	Acc_rawX=(Wire.read()<<8|Wire.read())/4096.0 ; //each value needs two registres
-	Acc_rawY=(Wire.read()<<8|Wire.read())/4096.0 ;
-	Acc_rawZ=(Wire.read()<<8|Wire.read())/4096.0 ; 
+	readAccelRaw();
 
 	/*Now in order to obtain the Acc angles we use euler's formula with acceleration values
 	after that we substract the error value found before*/  
@@ -209,6 +214,8 @@ void loop() {
 
 
 	/*///////////////////////////P I D///////////////////////////////////*/
+
+	///////////// Calculate Error //////////////
 	roll_desired_angle = map(input_ROLL,1000,2000,-10,10);
 	pitch_desired_angle = map(input_PITCH,1000,2000,-10,10);
 
@@ -217,11 +224,14 @@ void loop() {
 	roll_error = Total_angle_y - roll_desired_angle;
 	pitch_error = Total_angle_x - pitch_desired_angle;   
 
+	////////////// P /////////////
 	/*Next the proportional value of the PID is just a proportional constant
 	*multiplied by the error*/
 
 	roll_pid_p = roll_kp*roll_error;
 	pitch_pid_p = pitch_kp*pitch_error;
+
+	///////////// I ///////////////
 	/*The integral part should only act if we are close to the
 	desired position but we want to fine tune the error. That's
 	why I've made a if operation for an error between -2 and 2 degree.
@@ -237,6 +247,7 @@ void loop() {
 		pitch_pid_i = pitch_pid_i+(pitch_ki*pitch_error);  
 	}
 
+	///////////// D ///////////////
 	/*The last part is the derivative. The derivative acts upon the rate of change of the error.
 	As we know the rate of change is the change in error over time.
 	For that we will use a variable called previous_error.
@@ -245,9 +256,20 @@ void loop() {
 	roll_pid_d = roll_kd*((roll_error - roll_previous_error)/elapsedTime);
 	pitch_pid_d = pitch_kd*((pitch_error - pitch_previous_error)/elapsedTime);
 
+
+	//////////// Sum PID for output /////////////
 	/*The final PID values is the sum of each of this 3 parts*/
 	roll_PID = roll_pid_p + roll_pid_i + roll_pid_d;
 	pitch_PID = pitch_pid_p + pitch_pid_i + pitch_pid_d;
+
+
+	//Remember to store the previous error.
+	roll_previous_error = roll_error; 
+	pitch_previous_error = pitch_error;
+
+	
+
+	//////////// Calculate PWM values ///////////////
 
 	/*We know that the min value of PWM signal is 1000us and the max is 2000. So that
 	tells us that the PID value can't oscilate more than -1000 and 1000 because when we
@@ -309,9 +331,6 @@ void loop() {
 	  pwm_L_B=2000;
 	}
 
-	roll_previous_error = roll_error; //Remember to store the previous error.
-	pitch_previous_error = pitch_error; //Remember to store the previous error.
-
 	/********* DEBUG *******
 	Serial.print("RF: ");
 	Serial.print(pwm_R_F);
@@ -335,10 +354,7 @@ void loop() {
 	*************************/
 
 
-
-
-
-
+	///////////////////////////////// Write to ESCs //////////////////////////////
 
 	/*now we can write the values PWM to the ESCs only if the motor is activated
 	*/
@@ -398,7 +414,7 @@ void loop() {
  * Interrupt Service Routine - 
  * Handles digital state changes on pins D8, D9, D10, and D12
  * *****************************************/
-void pinISR(){
+void pinChangeISR(){
 //First we take the current count value in micro seconds using the micros() function
   
   current_count = micros();
