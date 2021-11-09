@@ -4,15 +4,17 @@
 // We know that the slave adress for this IMU is 0x68
 #define SLAVE_ADDR 0x68
 
+void pinISR();
+
 void setup() {
 	/********************************************
 	 * Enable interrupts
 	 ********************************************/
 	// Set pins D8, D9, D10, and D12 to trigger an interrupt on state change, using function "ISR"
-	attachInterrupt(digitalPinToInterrupt(8), ISR, CHANGE); 
-	attachInterrupt(digitalPinToInterrupt(9), ISR, CHANGE); 
-	attachInterrupt(digitalPinToInterrupt(10), ISR, CHANGE);
-	attachInterrupt(digitalPinToInterrupt(12), ISR, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(8), pinISR, CHANGE); 
+	attachInterrupt(digitalPinToInterrupt(9), pinISR, CHANGE); 
+	attachInterrupt(digitalPinToInterrupt(10), pinISR, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(12), pinISR, CHANGE);
 	/*********
 	 * Low level equivalent code:
 	 *	PCICR |= (1 << PCIE0);    //enable PCMSK0 scan                                                 
@@ -235,11 +237,11 @@ void loop() {
 		pitch_pid_i = pitch_pid_i+(pitch_ki*pitch_error);  
 	}
 
-	/*The last part is the derivate. The derivate acts upon the speed of the error.
-	As we know the speed is the amount of error that produced in a certain amount of
-	time divided by that time. For taht we will use a variable called previous_error.
+	/*The last part is the derivative. The derivative acts upon the rate of change of the error.
+	As we know the rate of change is the change in error over time.
+	For that we will use a variable called previous_error.
 	We substract that value from the actual error and divide all by the elapsed time. 
-	Finnaly we multiply the result by the derivate constant*/
+	Finnaly we multiply the result by the derivative constant*/
 	roll_pid_d = roll_kd*((roll_error - roll_previous_error)/elapsedTime);
 	pitch_pid_d = pitch_kd*((pitch_error - pitch_previous_error)/elapsedTime);
 
@@ -247,9 +249,9 @@ void loop() {
 	roll_PID = roll_pid_p + roll_pid_i + roll_pid_d;
 	pitch_PID = pitch_pid_p + pitch_pid_i + pitch_pid_d;
 
-	/*We know taht the min value of PWM signal is 1000us and the max is 2000. So that
-	tells us that the PID value can/s oscilate more than -1000 and 1000 because when we
-	have a value of 2000us the maximum value taht we could substract is 1000 and when
+	/*We know that the min value of PWM signal is 1000us and the max is 2000. So that
+	tells us that the PID value can't oscilate more than -1000 and 1000 because when we
+	have a value of 2000us the maximum value that we could substract is 1000 and when
 	we have a value of 1000us for the PWM signal, the maximum value that we could add is 1000
 	to reach the maximum 2000us. But we don't want to act over the entire range so -+400 should be enough*/
 	if(roll_PID < -400){roll_PID=-400;}
@@ -392,17 +394,11 @@ void loop() {
 
 
 
-
-
-
-
-
-
 /******************************************
  * Interrupt Service Routine - 
  * Handles digital state changes on pins D8, D9, D10, and D12
  * *****************************************/
-ISR(PCINT0_vect){
+void pinISR(){
 //First we take the current count value in micro seconds using the micros() function
   
   current_count = micros();
